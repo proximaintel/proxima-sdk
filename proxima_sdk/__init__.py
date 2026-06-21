@@ -32,7 +32,7 @@ from .exceptions import (
 )
 from .types import SearchResult, SearchResults, Citation, QueryMetadata
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 __all__ = [
     "PlatformContext",
