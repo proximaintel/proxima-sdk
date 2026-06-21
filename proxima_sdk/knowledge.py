@@ -21,7 +21,6 @@ import time
 from typing import Optional
 
 import httpx
-import pandas as pd
 
 from .types import SearchResult, SearchResults, Citation, QueryMetadata
 from .exceptions import (
@@ -63,7 +62,7 @@ class KnowledgeClient:
         self._knowledge_bases = knowledge_bases
         self._sources = {s["id"]: s for s in sources}
         self._timeout = timeout
-        self._cache: dict[str, pd.DataFrame] = {}
+        self._cache: dict = {}
 
         # Auth
         self._token = token
@@ -156,7 +155,7 @@ class KnowledgeClient:
         except httpx.TimeoutException:
             raise ProximaTimeoutError("Gateway", self._timeout)
 
-    def read(self, source_id: str, use_cache: bool = True) -> pd.DataFrame:
+    def read(self, source_id: str, use_cache: bool = True):
         """
         Read structured data from a knowledge source.
         Routes through gateway /knowledge/{base_id}/query.
@@ -166,8 +165,10 @@ class KnowledgeClient:
             use_cache: If True, returns cached data within same tool execution
 
         Returns:
-            pd.DataFrame with the source data
+            pd.DataFrame with the source data (requires pandas)
         """
+        import pandas as pd
+
         if use_cache and source_id in self._cache:
             return self._cache[source_id]
 
