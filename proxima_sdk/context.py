@@ -18,11 +18,16 @@ from .knowledge import KnowledgeClient
 
 
 class GovernanceClient:
-    """Log actions and events to the platform governance system."""
+    """Log actions and query governance data from the platform."""
 
     def __init__(self, gateway_url: str, agent_id: str):
         self._gateway_url = gateway_url
         self._agent_id = agent_id
+        self._headers = {}
+        import os
+        token = os.getenv("PLATFORM_INTERNAL_SECRET", "")
+        if token:
+            self._headers["Authorization"] = f"Bearer platform:{token}"
 
     def log_action(self, action: str, detail: dict | None = None):
         """Log a toolbox action to governance (async fire-and-forget)."""
@@ -31,10 +36,43 @@ class GovernanceClient:
             httpx.post(
                 f"{self._gateway_url}/governance/logs",
                 json={"agent_id": self._agent_id, "type": "action", "action": action, "detail": detail or {}},
+                headers=self._headers,
                 timeout=5.0,
             )
         except Exception:
-            pass  # Non-blocking — governance logging should never break tool execution
+            pass
+
+    def get_stats(self) -> dict:
+        """Get governance stats for this agent."""
+        import httpx
+        try:
+            r = httpx.get(
+                f"{self._gateway_url}/governance/stats",
+                params={"agent_id": self._agent_id},
+                headers=self._headers,
+                timeout=10.0,
+            )
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return {"totalQueries": 0, "totalTokens": 0, "totalCost": 0, "avgDurationMs": 0}
+
+    def get_logs(self, limit: int = 50) -> list:
+        """Get governance logs for this agent."""
+        import httpx
+        try:
+            r = httpx.get(
+                f"{self._gateway_url}/governance/logs",
+                params={"agent_id": self._agent_id, "limit": limit},
+                headers=self._headers,
+                timeout=10.0,
+            )
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return []
 
 
 class SecretsClient:
