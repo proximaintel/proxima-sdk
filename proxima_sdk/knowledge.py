@@ -157,56 +157,108 @@ class KnowledgeClient:
 
     def read(self, source_id: str, use_cache: bool = True):
         """
-        Read structured data from a knowledge source.
-        Routes through gateway /knowledge/{base_id}/query.
+        Read structured data from a knowledge source using direct provider adapters.
+        No LLM involved — reads raw data from the configured provider (blob, postgres, etc.).
 
         Args:
             source_id: ID of the registered knowledge source
-            use_cache: If True, returns cached data within same tool execution
+            use_cache: If True, caches DataFrame (per source, per container lifetime)
 
         Returns:
             pd.DataFrame with the source data (requires pandas)
         """
         import pandas as pd
+        import io
 
         if use_cache and source_id in self._cache:
             return self._cache[source_id]
 
-        # Find which KB contains this source
-        # For now, query the first available KB with the source name
-        base_id = self._knowledge_bases[0] if self._knowledge_bases else "default"
+        # Find source config from context
+        source = self._sources.get(source_id)
+        if not source:
+            return pd.DataFrame()
 
-        result = self.query(base_id, f"read all data from {source_id}", top_k=1)
+        provider = source.get("provider", "")
+        connection = source.get("connection", {})
+        if not provider or not connection:
+            return pd.DataFrame()
 
-        # Parse results into DataFrame
-        for r in result.get("results", []):
-            content = r.get("content", "")
-            if "rows" in content and "|" in content:
-                # Try to parse markdown table
-                try:
-                    lines = [l.strip() for l in content.split("\n") if l.strip() and "|" in l]
-                    if len(lines) >= 3:
-                        headers = [h.strip() for h in lines[0].split("|") if h.strip()]
-                        rows = []
-                        for line in lines[2:]:
-                            if "---" in line or "..." in line:
-                                continue
-                            row = [c.strip() for c in line.split("|") if c.strip()]
-                            if len(row) == len(headers):
-                                rows.append(row)
-                        if rows:
-                            df = pd.DataFrame(rows, columns=headers)
-                            if use_cache:
-                                self._cache[source_id] = df
-                            return df
-                except Exception:
-                    pass
+        # Resolve secret (connection string)
+        secret_name = connection.get("connection_string_env", "")
+        conn_str = ""
+        if secret_name:
+            conn_str = self._resolve_secret(secret_name)
+        if not conn_str and provider in ("azure_blob", "postgresql", "snowflake"):
+            return pd.DataFrame()
 
-        # Fallback: return empty DataFrame
+        # Read using provider adapter
         df = pd.DataFrame()
-        if use_cache:
+        try:
+            if provider == "azure_blob":
+                from azure.storage.blob import BlobServiceClient
+                container = connection.get("container", "gold")
+                path = connection.get("path", "")
+                if not path:
+                    return pd.DataFrame()
+                blob_svc = BlobServiceClient.from_connection_string(conn_str)
+                blob = blob_svc.get_container_client(container).get_blob_client(path)
+                data = blob.download_blob().readall()
+                df = pd.read_parquet(io.BytesIO(data))
+
+            elif provider == "aws_s3":
+                import boto3
+                bucket = connection.get("bucket", "")
+                path = connection.get("path", "")
+                s3 = boto3.client("s3")
+                obj = s3.get_object(Bucket=bucket, Key=path)
+                df = pd.read_parquet(io.BytesIO(obj["Body"].read()))
+
+            elif provider == "postgresql":
+                import sqlalchemy
+                table = connection.get("table", source_id.replace("-", "_"))
+                engine = sqlalchemy.create_engine(conn_str)
+                df = pd.read_sql_table(table, engine)
+
+            elif provider == "snowflake":
+                from snowflake.connector import connect as sf_connect
+                from snowflake.connector.pandas_tools import fetch_pandas_all
+                table = connection.get("table", source_id.replace("-", "_"))
+                parts = conn_str.split(";")
+                conn_params = {}
+                for p in parts:
+                    if "=" in p:
+                        k, v = p.split("=", 1)
+                        conn_params[k.strip().lower()] = v.strip()
+                conn = sf_connect(**conn_params)
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT * FROM {table}")
+                df = fetch_pandas_all(cursor)
+                conn.close()
+
+        except Exception:
+            df = pd.DataFrame()
+
+        if use_cache and not df.empty:
             self._cache[source_id] = df
         return df
+
+    def _resolve_secret(self, secret_name: str) -> str:
+        """Resolve a secret from the platform via gateway internal API."""
+        import httpx
+        headers = {}
+        if self._token:
+            headers["Authorization"] = f"Bearer platform:{self._token}"
+        try:
+            res = httpx.get(
+                f"{self._gateway_url}/internal/secrets/{secret_name}",
+                headers=headers,
+                timeout=10.0,
+            )
+            if res.status_code == 200:
+                return res.json().get("value", "")
+        except Exception:
+            pass
+        return ""
 
     def search(self, source_id: str, query: str, top_k: int = 5) -> SearchResults:
         """

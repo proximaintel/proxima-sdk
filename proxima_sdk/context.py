@@ -64,30 +64,37 @@ class PlatformContext:
 
     Constructed by the gateway from the agent's config and passed to the toolbox
     in the request payload under the `_context` key.
+
+    For data endpoints (GET), use PlatformContext.from_request(request) which
+    reads the X-Platform-Context header injected by the gateway proxy.
     """
 
     def __init__(self, config: dict):
-        """
-        Args:
-            config: The _context dict injected by the gateway into tool call payloads.
-                {
-                    "gateway_url": "https://gateway.example.com",
-                    "agent_id": "invoice-intelligence",
-                    "knowledge_bases": ["finance-kb"],
-                    "sources": [...],
-                    "token": "<_context HMAC token for dev mode>",
-                    "identity": {
-                        "client_id": "<agent SP client_id>",
-                        "client_secret": "<agent SP secret>",
-                        "tenant_id": "<IdP tenant>",
-                        "audience": "api://<gateway app id>"
-                    }
-                }
-        """
         self._config = config
         self._knowledge: Optional[KnowledgeClient] = None
         self._governance: Optional[GovernanceClient] = None
         self._secrets: Optional[SecretsClient] = None
+
+    @classmethod
+    def from_request(cls, request) -> "PlatformContext":
+        """Construct from a FastAPI/Starlette request.
+        Reads X-Platform-Context header injected by gateway proxy."""
+        import json as _json
+        header = request.headers.get("x-platform-context", "")
+        if header:
+            try:
+                config = _json.loads(header)
+                return cls(config)
+            except (ValueError, TypeError):
+                pass
+        # Fallback: construct from env vars (limited — no sources)
+        import os
+        return cls({
+            "gateway_url": os.getenv("GATEWAY_URL", "http://gateway"),
+            "agent_id": os.getenv("AGENT_ID", ""),
+            "token": os.getenv("PLATFORM_INTERNAL_SECRET", ""),
+            "sources": [],
+        })
 
     @property
     def knowledge(self) -> KnowledgeClient:
