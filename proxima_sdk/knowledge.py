@@ -244,10 +244,13 @@ class KnowledgeClient:
 
     def _resolve_secret(self, secret_name: str) -> str:
         """Resolve a secret from the platform via gateway internal API."""
+        import os
         import httpx
+        # Use PLATFORM_INTERNAL_SECRET env var (set on toolbox container by deploy service)
+        platform_token = os.getenv("PLATFORM_INTERNAL_SECRET", self._token)
         headers = {}
-        if self._token:
-            headers["Authorization"] = f"Bearer platform:{self._token}"
+        if platform_token:
+            headers["Authorization"] = f"Bearer platform:{platform_token}"
         try:
             res = httpx.get(
                 f"{self._gateway_url}/internal/secrets/{secret_name}",
