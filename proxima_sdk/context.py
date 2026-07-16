@@ -125,12 +125,13 @@ class PlatformContext:
                 return cls(config)
             except (ValueError, TypeError):
                 pass
-        # Fallback: construct from env vars (limited — no sources)
+        # Fallback: construct from env vars (internal service calls)
         import os
+        token = os.getenv("PLATFORM_INTERNAL_SECRET", "")
         return cls({
             "gateway_url": os.getenv("GATEWAY_URL", "http://gateway"),
             "agent_id": os.getenv("AGENT_ID", ""),
-            "token": os.getenv("PLATFORM_INTERNAL_SECRET", ""),
+            "token": f"platform:{token}" if token else "",
             "sources": [],
         })
 

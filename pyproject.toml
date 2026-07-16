@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "proxima-sdk"
-version = "1.0.5"
+version = "1.0.6"
 description = "Proxima AIP SDK — build AI agents on the Proxima Intelligence platform"
 readme = "README.md"
 license = "Apache-2.0"
@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://proximaintel.com/aip"
+Homepage = "https://proximaintel.com/platform"
 Documentation = "https://docs.proximaintel.com/sdk"
 Repository = "https://github.com/proximaintel/proxima-sdk"
 
