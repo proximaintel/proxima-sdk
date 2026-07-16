@@ -125,15 +125,48 @@ class PlatformContext:
                 return cls(config)
             except (ValueError, TypeError):
                 pass
-        # Fallback: construct from env vars (internal service calls)
+        # Fallback: construct from env vars and fetch sources from gateway
         import os
         token = os.getenv("PLATFORM_INTERNAL_SECRET", "")
+        agent_id = os.getenv("AGENT_ID", "")
+        gateway_url = os.getenv("GATEWAY_URL", "http://gateway")
+        sources = cls._fetch_sources(gateway_url, agent_id, token)
         return cls({
-            "gateway_url": os.getenv("GATEWAY_URL", "http://gateway"),
-            "agent_id": os.getenv("AGENT_ID", ""),
+            "gateway_url": gateway_url,
+            "agent_id": agent_id,
             "token": f"platform:{token}" if token else "",
-            "sources": [],
+            "knowledge_bases": [],
+            "sources": sources,
         })
+
+    _sources_cache: list = []
+
+    @classmethod
+    def _fetch_sources(cls, gateway_url: str, agent_id: str, token: str) -> list:
+        """Fetch source configs from gateway (cached after first call)."""
+        if cls._sources_cache:
+            return cls._sources_cache
+        import httpx
+        try:
+            headers = {}
+            if token:
+                headers["Authorization"] = f"Bearer platform:{token}"
+            # Get agent config to find knowledge bases
+            r = httpx.get(f"{gateway_url}/build/agents/{agent_id}", headers=headers, timeout=10.0, verify=False)
+            if r.status_code != 200:
+                return []
+            agent = r.json().get("agent", r.json())
+            kb_ids = agent.get("knowledge_bases", [])
+            # Fetch sources from each KB
+            sources = []
+            for kb_id in kb_ids:
+                r2 = httpx.get(f"{gateway_url}/build/knowledge/bases/{kb_id}", headers=headers, timeout=10.0, verify=False)
+                if r2.status_code == 200:
+                    sources.extend(r2.json().get("sources", []))
+            cls._sources_cache = sources
+            return sources
+        except Exception:
+            return []
 
     @property
     def knowledge(self) -> KnowledgeClient:
